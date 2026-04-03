@@ -1,8 +1,10 @@
 #pragma once
 #include "../core/eviction_policy.hpp"
 
-template <typename K, typename V> class LRUCache : public Cache<K, V> {
-public:
+template <typename K, typename V> 
+class LRUCache : public Cache<K, V> 
+{
+private:
   std::map<K, std::shared_ptr<Node<K, V>>> cache_map;
   std::shared_ptr<Node<K, V>> head, tail;
   EvictionPolicy<K, V> lru_eviction;
@@ -21,15 +23,18 @@ public:
   bool remove(K key) override;
 };
 
-template <typename K, typename V> void remove_from_dll(Node<K, V> *node) {
+template <typename K, typename V> 
+void remove_from_dll(Node<K, V> *node) 
+{
   Node<K, V> *next_node = node->next;
   Node<K, V> *prev_node = node->prev;
   next_node->prev = prev_node;
   prev_node->next = next_node;
 }
 
-template <typename K, typename V>
-void add_to_dll(Node<K, V> *node, Node<K, V> *head) {
+template <typename K, typename V> 
+void add_to_dll(Node<K, V> *node, Node<K, V> *head) 
+{
   Node<K, V> *next_node = head->next;
   head->next = node;
   node->prev = head;
@@ -60,25 +65,29 @@ inline bool LRUCache<K, V>::set(K key, V value) {
     add_to_dll(ref_node.get(), head.get());
     cache_map[key] = ref_node;
   }
-
   return true;
 }
 
 template <typename K, typename V>
-inline std::optional<V> LRUCache<K, V>::get(K key) {
-  if (cache_map.find(key) != cache_map.end()) {
+inline std::optional<V> LRUCache<K, V>::get(K key) 
+{
+  if (cache_map.find(key) != cache_map.end()) 
+  {
     Node<K, V> *ref_node = cache_map[key].get();
     // redefining the connections, not altering the memory address
     remove_from_dll(ref_node); // remove connection, not delete
     add_to_dll(ref_node, head.get());
 
     return ref_node->value;
-  } else {
+  } 
+  else 
+  {
     return std::nullopt;
   }
 }
 
-template <typename K, typename V> inline bool LRUCache<K, V>::remove(K key) {
+template <typename K, typename V> 
+inline bool LRUCache<K, V>::remove(K key) {
   try {
     // If key does not exists
     if (cache_map.find(key) == cache_map.end()) {
@@ -87,9 +96,7 @@ template <typename K, typename V> inline bool LRUCache<K, V>::remove(K key) {
     // If key exists
     Node<K, V> *ref_node = cache_map[key].get();
     remove_from_dll(ref_node);
-    cache_map.erase(key);
-    // shared_ptr auto-deletes when erased from map, no manual delete needed
-
+    cache_map.erase(key); // shared_ptr auto-deletes when erased from map, no manual delete needed
     return true;
   } catch (const std::exception &ex) {
     std::cerr << "Error removing the Key! " << ex.what() << std::endl;
