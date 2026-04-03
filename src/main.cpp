@@ -1,62 +1,42 @@
-#include "cache_manager.hpp"
+#include "../include/policies/lru.hpp"
+#include "./cache_manager.hpp"
 
 int main()
  {
-  LRUCache<int, std::string> cache(2);
+  auto cache = std::make_unique<LRUCache<int, std::string>>(15);
 
-  cache.set(1, "hello");
-  cache.set(2, "okay");
-  auto val1 = cache.get(1);
-  if (val1.has_value())
-    std::cout << val1.value() << std::endl;
-  auto val2 = cache.get(2);
-  if (val2.has_value())
-    std::cout << val2.value() << std::endl;
+  ConcurrentCache<int, std::string> manager(std::move(cache));
 
-  for(auto val : cache.cache_map)
-  {
-    std::cout << val.first << " " << val.second->value << std::endl;
-    std::cout << "size : " << cache.cache_map.size() << std::endl;
-  }
+  std::vector<std::thread> threads;
 
-  cache.set(3, "hmm");
-  auto val3 = cache.get(3);
-  if (val3.has_value())
-    std::cout << val3.value() << std::endl;
-  else
-    std::cout << "Value does not exist" << std::endl;
+  std::thread t1([&](){
+    manager.set(1, "hello1");
+	manager.set(12, "hello12");
+  });
 
-  cache.set(3, "no");
-  auto valo = cache.get(3);
-  if (valo.has_value())
-    std::cout << valo.value() << std::endl;
-  else
-    std::cout << "Value does not exist" << std::endl;
-  
-  
-  cache.set(4, "done");
+  std::thread t2([&](int key, std::string value){
+    manager.set(key, value);
+  }, 2, "okay");
 
-  auto val4 = cache.get(4);
-  if (val4.has_value())
-    std::cout << val4.value() << std::endl;
+  std::thread t3([&](int key){
+    auto val = manager.get(key);
+    if (val) std::cout << "Value of key 1 is " << *val << std::endl;
+  }, 1);
 
-  auto val5 = cache.get(2);
-  if (val5.has_value())
-    std::cout << val5.value() << std::endl;
-  else
-    std::cout << "Value does not exist" << std::endl;
+  std::thread t4([&](){
+    auto val2 = manager.get(2);
+    if (val2) std::cout << "Value of key 2 is " << *val2 << std::endl;
+    auto val12 = manager.get(12);
+    if (val12) std::cout << "Value of key 12 is " << *val12 << std::endl;
+  });
 
-  auto val6 = cache.get(3);
-  if (val6.has_value())
-    std::cout << val6.value() << std::endl;
-  else
-    std::cout << "Value does not exist" << std::endl;
+  threads.push_back(std::move(t1));
+  threads.push_back(std::move(t2));
+  threads.push_back(std::move(t3));
+  threads.push_back(std::move(t4));
 
-  auto val7 = cache.get(5);
-  if (val7.has_value())
-    std::cout << val7.value() << std::endl;
-  else
-    std::cout << "Value does not exist" << std::endl;
+  for (auto &t : threads)
+    t.join();
 
   return 0;
 }
