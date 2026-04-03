@@ -2,12 +2,19 @@
 
 #include <iostream>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
+#include <shared_mutex>
+
+/*  `cache_base.hpp` : This file Implements the base class for the cache and the Node class for the DLL, 
+    the base class provides virtual interface which needs to be implemented by the derived classes
+ */
 
 template <typename K, typename V>
 /* DLL */
@@ -30,7 +37,7 @@ public:
   uint32_t capacity;
   Cache(uint32_t cap) : capacity(cap) {}
   virtual ~Cache() = default;
-  virtual std::optional<V> get(K key) = 0;
-  virtual bool set(K key, V value) = 0;
-  virtual bool remove(K key) = 0;
+  virtual std::optional<V> get(const K& key) = 0;
+  virtual bool set(const K& key, const V& value) = 0;
+  virtual bool remove(const K& key) = 0;
 };

@@ -301,22 +301,22 @@ Both `LRU` and `LFU` implement the same interface so they can be swapped at runt
 ```cpp
 // cache_base.hpp
 template <typename K, typename V>
-class Cache_Operations {
+class Cache {
 public:
     virtual V get(K key) = 0;
     virtual bool put(K key, V value) = 0;
     virtual bool remove(K key) = 0;
-    virtual ~Cache_Operations() = default;  // MUST be virtual for polymorphic delete
+    virtual ~Cache() = default;  // MUST be virtual for polymorphic delete
 };
 ```
 
 ### Why virtual destructor?
-If you delete an `LRU` via a `Cache_Operations*` pointer, without a virtual destructor, only the base destructor runs — the derived class destructor is skipped → memory leak.
+If you delete an `LRU` via a `Cache*` pointer, without a virtual destructor, only the base destructor runs — the derived class destructor is skipped → memory leak.
 
 ### Usage
 ```cpp
 // Swap policies at runtime
-std::unique_ptr<Cache_Operations<int, int>> cache;
+std::unique_ptr<Cache<int, int>> cache;
 
 cache = std::make_unique<LRUCache<int, int>>(100);
 // or

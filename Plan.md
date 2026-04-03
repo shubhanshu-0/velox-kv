@@ -10,7 +10,7 @@ A high-performance, thread-safe in-memory caching system built in C++ with plugg
 - [x] Template-based generic key-value types
 - [x] Smart pointer memory management
 - [x] Fix remaining bugs (head/tail, put() value update)
-- [x] Abstract base class (`Cache_Operations`)
+- [x] Abstract base class (`Cache`)
 - [ ] Eviction strategy pattern (abstract base class)
 - [ ] LFU eviction policy
 - [ ] Thread safety (`std::shared_mutex`)
@@ -27,7 +27,7 @@ A high-performance, thread-safe in-memory caching system built in C++ with plugg
 ```
 include/
   core/
-    cache_base.hpp          # Abstract base: Cache_Operations<K,V>
+    cache_base.hpp          # Abstract base: Cache<K,V>
     eviction_policy.hpp     # Abstract eviction strategy
   policies/
     lru.hpp                 # LRU: O(1) via DLL + unordered_map
@@ -165,7 +165,7 @@ endif
 
 **Step 2: Proper abstract base class**
 - Add `virtual` to methods in `cache_base.hpp`
-- `Cache<K,V>` inherits from `Cache_Operations<K,V>`
+- `Cache<K,V>` inherits from `Cache<K,V>`
 
 **Step 3: Meson build**
 - `meson.build` in project root (see above)
@@ -176,7 +176,7 @@ endif
 - O(1) via min-frequency tracking + per-frequency doubly linked list
 
 **Step 5: Implement `remove()` method**
-- Declared in `Cache_Operations` base but not yet implemented
+- Declared in `Cache` base but not yet implemented
 - Remove from both `cache_map` and DLL in O(1)
 - Handle missing key gracefully (return false)
 

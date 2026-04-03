@@ -1,11 +1,15 @@
 #pragma once
 #include "../core/eviction_policy.hpp"
 
+/*  `lru.hpp` : This file implements the LRU cache policy,
+    offers set(), get() and remove() function
+*/
+
 template <typename K, typename V> 
 class LRUCache : public Cache<K, V> 
 {
 private:
-  std::map<K, std::shared_ptr<Node<K, V>>> cache_map;
+  std::unordered_map<K, std::shared_ptr<Node<K, V>>> cache_map;
   std::shared_ptr<Node<K, V>> head, tail;
   EvictionPolicy<K, V> lru_eviction;
 
@@ -18,9 +22,9 @@ public:
   }
   ~LRUCache() = default;
 
-  std::optional<V> get(K key) override;
-  bool set(K key, V value) override;
-  bool remove(K key) override;
+  std::optional<V> get(const K& key) override;
+  bool set(const K& key, const V& value) override;
+  bool remove(const K& key) override;
 };
 
 template <typename K, typename V> 
@@ -43,7 +47,7 @@ void add_to_dll(Node<K, V> *node, Node<K, V> *head)
 }
 
 template <typename K, typename V>
-inline bool LRUCache<K, V>::set(K key, V value) {
+inline bool LRUCache<K, V>::set(const K& key, const V& value) {
   // if k-v pair exist
   if (cache_map.find(key) != cache_map.end()) {
     if (head->next != cache_map[key].get()) {
@@ -69,7 +73,7 @@ inline bool LRUCache<K, V>::set(K key, V value) {
 }
 
 template <typename K, typename V>
-inline std::optional<V> LRUCache<K, V>::get(K key) 
+inline std::optional<V> LRUCache<K, V>::get(const K& key) 
 {
   if (cache_map.find(key) != cache_map.end()) 
   {
@@ -87,7 +91,7 @@ inline std::optional<V> LRUCache<K, V>::get(K key)
 }
 
 template <typename K, typename V> 
-inline bool LRUCache<K, V>::remove(K key) {
+inline bool LRUCache<K, V>::remove(const K& key) {
   try {
     // If key does not exists
     if (cache_map.find(key) == cache_map.end()) {
