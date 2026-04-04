@@ -24,10 +24,12 @@ public:
   V value;
   Node *prev;
   Node *next;
-  bool is_sentinel;
+  bool is_sentinel; // True if this is a dummy head/tail node, false for actual data nodes
 
+  // Constructor for Sentinel nodes (dummy placeholders)
   Node() : prev(nullptr), next(nullptr), is_sentinel(true) {}
 
+  // Constructor for actual data nodes
   Node(K k, V v)
       : key(k), value(v), prev(nullptr), next(nullptr), is_sentinel(false) {}
 };

@@ -9,8 +9,8 @@ template <typename K, typename V>
 class LRUCache : public Cache<K, V> 
 {
 private:
-  std::unordered_map<K, std::shared_ptr<Node<K, V>>> cache_map;
-  std::shared_ptr<Node<K, V>> head, tail;
+  std::unordered_map<K, std::shared_ptr<Node<K, V>>> cache_map; // [Key] -> Pointer to MemoryAddress of Node
+  std::shared_ptr<Node<K, V>> head, tail; // Head and Tail of DLL
   EvictionPolicy<K, V> lru_eviction;
 
 public:
