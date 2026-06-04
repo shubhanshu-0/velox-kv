@@ -55,6 +55,7 @@ class SerialCache : public Cache<K, V>
             return serial_manager.cache_policy->remove(key);
         }
 
+        // Not usually used directly, used when cache storage is full and we need to evict something to make room for a new key.
         std::optional<K> evict() override
         {
             return serial_manager.cache_policy->evict();
@@ -113,6 +114,7 @@ public:
         return threads_manager.cache_policy->remove(key);
     }
 
+    // Not usually used directly, used when cache storage is full and we need to evict something to make room for a new key.
     std::optional<K> evict() override
     {
         std::unique_lock<std::shared_mutex> lock(threads_manager.rw_mtx);
@@ -194,6 +196,8 @@ public:
         std::unique_lock<std::shared_mutex> lock(shard.rw_mtx);
         return shard.cache_policy->remove(key);
     }
+
+    // Not usually used directly, used when cache storage is full and we need to evict something to make room for a new key.
 
     std::optional<K> evict() override
     {

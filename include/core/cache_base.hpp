@@ -30,13 +30,17 @@ public:
 
 	// Constructor for Sentinel nodes (dummy placeholders)
 	Node() : 
-		prev(nullptr), next(nullptr), is_sentinel(true), 
-		expiration_time(0) {}
+		prev(nullptr), next(nullptr),
+		expiration_time(0),
+		current_timestamp(std::chrono::steady_clock::now()),
+		is_sentinel(true) {}
 
 	// Constructor for actual data nodes
 	Node(K k, V v, uint32_t expiration_time = 0)
-		: key(k), value(v), prev(nullptr), next(nullptr), is_sentinel(false),
-		  expiration_time(expiration_time), current_timestamp(std::chrono::steady_clock::now()) {}
+		: key(k), value(v), prev(nullptr), next(nullptr),
+		  expiration_time(expiration_time), 
+		  current_timestamp(std::chrono::steady_clock::now()),
+		  is_sentinel(false) {}
 };
 
 template <typename K, typename V> class Cache {
