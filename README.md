@@ -2,10 +2,7 @@
 
 A **production-ready, thread-safe key-value cache** built from scratch in C++ with multiple eviction policies, TTL support, and a TCP server interface.
 
-```
-SET key value  →  [Concurrent Cache Manager]  →  OK
-GET key        →  [DLL + HashMap Lookup]     →  VALUE: value
-```
+<img width="1177" height="695" alt="Velox-KV" src="https://github.com/shubhanshu-0/velox-kv/blob/master/docs/design.png?raw=true" />
 
 ---
 
