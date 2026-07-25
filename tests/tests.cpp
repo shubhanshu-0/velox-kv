@@ -1,13 +1,14 @@
-#include <iostream>
+#include "../include/core/cache_manager.hpp"
+#include "../include/policies/lru.hpp"
 #include <cassert>
+#include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
-#include "../include/policies/lru.hpp"
-#include "../include/core/cache_manager.hpp"
 
 // A helper to verify base functionality for ANY cache type
-void run_basic_test(Cache<int, std::string>& manager, const std::string& type_name) {
+void run_basic_test(Cache<int, std::string> &manager, const std::string &type_name)
+{
     std::cout << "[TEST] " << type_name << " - Basic Operations..." << std::endl;
 
     // 1. Test Set & Get
@@ -29,30 +30,35 @@ void run_basic_test(Cache<int, std::string>& manager, const std::string& type_na
 }
 
 // A helper for high-concurrency testing
-void run_concurrent_test(Cache<int, std::string>& manager, const std::string& type_name) {
+void run_concurrent_test(Cache<int, std::string> &manager, const std::string &type_name)
+{
     std::cout << "[TEST] " << type_name << " - Heavy Concurrency..." << std::endl;
-    
+
     const int ops_per_thread = 1000;
     const int num_threads = 8;
     std::vector<std::thread> workers;
 
-    for (int i = 0; i < num_threads; ++i) {
-        workers.emplace_back([&manager, i, ops_per_thread]() {
-            for (int j = 0; j < ops_per_thread; ++j) {
-                int key = i * ops_per_thread + j;
-                manager.set(key, "Val" + std::to_string(key));
-            }
-        });
+    for (int i = 0; i < num_threads; ++i)
+    {
+        workers.emplace_back(
+            [&manager, i, ops_per_thread]()
+            {
+                for (int j = 0; j < ops_per_thread; ++j)
+                {
+                    int key = i * ops_per_thread + j;
+                    manager.set(key, "Val" + std::to_string(key));
+                }
+            });
     }
-    
-    for (auto& t : workers) t.join();
+
+    for (auto &t : workers)
+        t.join();
     std::cout << "[PASS] " << type_name << " - Concurrency Stable!" << std::endl;
 }
 
-int main() {
-    auto factory = [](uint32_t cap) { 
-        return std::make_unique<LRUCache<int, std::string>>(cap); 
-    };
+int main()
+{
+    auto factory = [](uint32_t cap) { return std::make_unique<LRUCache<int, std::string>>(cap); };
 
     // 1. Test Serial Cache
     {

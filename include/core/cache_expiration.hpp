@@ -1,10 +1,10 @@
 #pragma once
+#include "cache_base.hpp"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <set>
 #include <thread>
-#include "cache_base.hpp"
 
 /*  `cache_expiration.hpp` : Manages TTL-based eviction for any Cache<K,V>.
     - add_for_expiry()  : registers a key with an absolute expiration time_point.
@@ -20,8 +20,7 @@
 
 using cache_clock = std::chrono::steady_clock;
 
-template <typename K, typename V>
-class CacheExpiration
+template <typename K, typename V> class CacheExpiration
 {
 private:
     std::set<std::pair<cache_clock::time_point, K>> expiring_elements;
@@ -29,10 +28,10 @@ private:
     std::condition_variable expire_cv;
 
     std::thread worker;
-    bool stop_flag = false;   // signals the background thread to exit
+    bool stop_flag = false; // signals the background thread to exit
 
     /**
-     * @brief thread_loop() — The actual loop run by the background thread. 
+     * @brief thread_loop() — The actual loop run by the background thread.
      * Receives the cache by pointer so we don't have to store it as a member
      * before start() is called.
      * @param cache : The cache to evict from.
@@ -45,12 +44,10 @@ private:
 
             // Sleep indefinitely if nothing is registered yet (or we've already
             // processed everything). Also exits cleanly when stop_flag is set.
-            expire_cv.wait(lock, [this]{
-                return stop_flag || !expiring_elements.empty();
-            });
+            expire_cv.wait(lock, [this] { return stop_flag || !expiring_elements.empty(); });
 
             if (stop_flag && expiring_elements.empty())
-                return;   // clean shutdown
+                return; // clean shutdown
 
             // Peek at the element that expires soonest.
             auto earliest = *expiring_elements.begin();
@@ -88,13 +85,10 @@ public:
     /**
      * @brief Destructor — always stops the background thread first.
      */
-    ~CacheExpiration()
-    {
-        stop();
-    }
+    ~CacheExpiration() { stop(); }
 
     // Non-copyable — owning a thread means this makes no sense to copy.
-    CacheExpiration(const CacheExpiration &)            = delete;
+    CacheExpiration(const CacheExpiration &) = delete;
     CacheExpiration &operator=(const CacheExpiration &) = delete;
 
     /**
@@ -102,10 +96,7 @@ public:
      * @param cache : Pass the cache by pointer (not reference) so the thread can be stored.
      * Call this exactly once after the cache is fully initialized.
      */
-    void start(Cache<K, V> *cache)
-    {
-        worker = std::thread(&CacheExpiration::thread_loop, this, cache);
-    }
+    void start(Cache<K, V> *cache) { worker = std::thread(&CacheExpiration::thread_loop, this, cache); }
 
     /**
      * @brief stop() — signals the thread to exit and waits for it to finish.
@@ -117,7 +108,7 @@ public:
             std::lock_guard<std::mutex> lock(rw_mutex);
             stop_flag = true;
         }
-        expire_cv.notify_all();    // wake thread so it can see stop_flag
+        expire_cv.notify_all(); // wake thread so it can see stop_flag
 
         if (worker.joinable())
             worker.join();
@@ -129,12 +120,9 @@ public:
      * @param timestamp_created : The time the key was inserted.
      * @param expiration_time_seconds : The time to live in seconds.
      */
-    void add_for_expiry(const K &key,
-                        cache_clock::time_point timestamp_created,
-                        uint32_t expiration_time_seconds)
+    void add_for_expiry(const K &key, cache_clock::time_point timestamp_created, uint32_t expiration_time_seconds)
     {
-        auto expiry_point = timestamp_created
-                          + std::chrono::seconds(expiration_time_seconds);
+        auto expiry_point = timestamp_created + std::chrono::seconds(expiration_time_seconds);
 
         std::unique_lock<std::mutex> lock(rw_mutex);
         auto [it, inserted] = // iterator, bool
@@ -151,8 +139,7 @@ public:
      * @param key : The key to remove.
      * @param expiry_point : The expiry point of the key.
      */
-    void remove_from_expiry(const K &key,
-                            cache_clock::time_point expiry_point)
+    void remove_from_expiry(const K &key, cache_clock::time_point expiry_point)
     {
         std::lock_guard<std::mutex> lock(rw_mutex);
         expiring_elements.erase({expiry_point, key});
