@@ -1,30 +1,34 @@
 #pragma once
 #include "../core/cache_base.hpp"
-/*  `lru.hpp` : This file implements the LRU cache policy,
-        offers set(), get() and remove() function
-*/
+
+/**
+ * @file lru.hpp
+ * @brief Least Recently Used (LRU) cache policy implementation.
+ *
+ * Implements the standard LRU cache strategy using a combination of a doubly linked list (for tracking recency)
+ * and a hash map (for O(1) lookups).
+ */
 
 template <typename K, typename V> class LRUCache : public Cache<K, V>
 {
 private:
-    std::unordered_map<K, std::shared_ptr<Node<K, V>>> cache_map; // [Key] -> Pointer to MemoryAddress of Node
-
-    /* MEMORY MANAGEMENT STRATEGY:
-       - head and tail are shared_ptr sentinels that live for the entire cache lifetime
-       - They are linked via raw pointers (head->next = tail, tail->prev = head)
-       - Data nodes are stored as shared_ptr in cache_map, keeping them alive while cached
-       - DLL operations use raw pointers for next/prev links (standard DLL pattern)
-       - When a data node is evicted: remove from DLL first, then erase from map to auto-delete
-       - This design is safe because head/tail are member variables and never reassigned
-    */
-    std::shared_ptr<Node<K, V>> head, tail; // Head and Tail sentinel nodes of DLL
+    std::unordered_map<K, std::shared_ptr<Node<K, V>>> cache_map; // Key to Node pointer mapping.
+    std::shared_ptr<Node<K, V>> head, tail;                       // Sentinel nodes of the DLL.
 
 public:
+    /**
+     * @brief Constructor for the LRU Cache.
+     *
+     * Sets up the sentinel nodes and links them together to form the initial empty list.
+     *
+     * @param capacity The maximum capacity of the cache.
+     */
     LRUCache(uint32_t capacity) : Cache<K, V>(capacity)
     {
         head = std::make_shared<Node<K, V>>();
         tail = std::make_shared<Node<K, V>>();
-        // Link sentinels: head <-> tail (no data nodes yet)
+
+        /* Link sentinels: head <-> tail */
         head->next = tail.get();
         tail->prev = head.get();
     }
@@ -34,8 +38,17 @@ public:
     std::optional<K> set(const K &key, const V &value, uint32_t expiration_time = 0) override;
     bool remove(const K &key) override;
     std::optional<K> evict() override;
+
+    uint64_t get_hits() const override { return 0; }
+    uint64_t get_misses() const override { return 0; }
+    uint64_t get_evictions() const override { return 0; }
 };
 
+/**
+ * @brief Helper to detach a node from the doubly linked list.
+ *
+ * Rewires the neighboring nodes to bypass the given node.
+ */
 template <typename K, typename V> void remove_from_dll(Node<K, V> *node)
 {
     Node<K, V> *next_node = node->next;
@@ -44,6 +57,11 @@ template <typename K, typename V> void remove_from_dll(Node<K, V> *node)
     prev_node->next = next_node;
 }
 
+/**
+ * @brief Helper to insert a node at the front of the list (just after the head sentinel).
+ *
+ * Places the node in the "Most Recently Used" (MRU) position.
+ */
 template <typename K, typename V> void add_to_dll(Node<K, V> *node, Node<K, V> *head)
 {
     Node<K, V> *next_node = head->next;
@@ -56,8 +74,11 @@ template <typename K, typename V> void add_to_dll(Node<K, V> *node, Node<K, V> *
 template <typename K, typename V> inline std::optional<K> LRUCache<K, V>::evict()
 {
     if (cache_map.empty())
+    {
         return std::nullopt;
+    }
 
+    /* Evict the node immediately preceding the tail sentinel (Least Recently Used). */
     Node<K, V> *end_node = tail->prev;
     K evicted_key = end_node->key;
     remove_from_dll(end_node);
@@ -70,14 +91,15 @@ inline std::optional<K> LRUCache<K, V>::set(const K &key, const V &value, uint32
 {
     std::optional<K> evicted_key = std::nullopt;
 
-    // if k-v pair exist
+    /* Check if the key already exists. */
     if (cache_map.find(key) != cache_map.end())
     {
         Node<K, V> *ref_node = cache_map[key].get();
-        // redefining the connections, not altering the memory address
+
+        /* Promote node to the front if it isn't already there. */
         if (head->next != ref_node)
         {
-            remove_from_dll(ref_node); // remove connection, not delete
+            remove_from_dll(ref_node);
             add_to_dll(ref_node, head.get());
         }
         cache_map[key]->value = value;
@@ -89,13 +111,12 @@ inline std::optional<K> LRUCache<K, V>::set(const K &key, const V &value, uint32
         }
         else
         {
-            cache_map[key]->expiration_time = 0; // 0 means no expiration
+            cache_map[key]->expiration_time = 0; // 0 indicates no expiration.
         }
     }
-    // if k-v pair does not exist
     else
     {
-        // remove a node if capacity exceeds
+        /* Evict the oldest item if capacity is exceeded. */
         if (cache_map.size() >= this->capacity)
         {
             evicted_key = this->evict();
@@ -113,7 +134,7 @@ template <typename K, typename V> inline std::optional<V> LRUCache<K, V>::get(co
     {
         Node<K, V> *ref_node = cache_map[key].get();
 
-        // Check for TTL expiration (Lazy Eviction)
+        /* Lazy TTL eviction check. */
         if (ref_node->expiration_time > 0)
         {
             auto now = std::chrono::steady_clock::now();
@@ -125,6 +146,7 @@ template <typename K, typename V> inline std::optional<V> LRUCache<K, V>::get(co
             }
         }
 
+        /* Promote node to MRU position upon access. */
         // redefining the connections, not altering the memory address
         remove_from_dll(ref_node); // remove connection, not delete
         add_to_dll(ref_node, head.get());
@@ -141,20 +163,20 @@ template <typename K, typename V> inline bool LRUCache<K, V>::remove(const K &ke
 {
     try
     {
-        // If key does not exists
         if (cache_map.find(key) == cache_map.end())
         {
-            throw std::runtime_error("Key is not present in the LRUCache !");
+            throw std::runtime_error("Key is not present in the LRUCache!");
         }
-        // If key exists
+
         Node<K, V> *ref_node = cache_map[key].get();
         remove_from_dll(ref_node);
         cache_map.erase(key); // shared_ptr auto-deletes when erased from map, no manual delete needed
+
         return true;
     }
     catch (const std::exception &ex)
     {
-        std::cerr << "Error removing the Key! " << ex.what() << std::endl;
+        std::cerr << "Error removing key: " << ex.what() << std::endl;
         return false;
     }
 }

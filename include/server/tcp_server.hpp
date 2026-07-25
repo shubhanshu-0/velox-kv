@@ -1,27 +1,30 @@
 #pragma once
-
 #include "../core/cache_manager.hpp"
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
-/*
-    VeloxKV TCP Server
-
-    Listens on port 6380 for client connections.
-    Each client connection is handled in a separate thread.
-    All clients share the same cache instance (thread-safe via shared_mutex).
-
-    Protocol: Simple text commands
-    Commands:
-      - GET key
-      - SET key value [expiration_seconds]
-      - DEL key
-      - FLUSH
-      - STATS
-      - INFO
-      - QUIT
-*/
+/**
+ * @file tcp_server.hpp
+ * @brief VeloxKV TCP Server interface.
+ *
+ * Each client connection is handled in a separate thread.
+ * All clients share a common thread-safe cache instance.
+ *
+ * Protocol: Simple text commands
+ * Commands:
+ *   - INIT <type> <capacity> (type: serial, concurrent, sharded)
+ *   - GET key
+ *   - SET key value [expiration_seconds]
+ *   - DEL key
+ *   - FLUSH
+ *   - STATS
+ *   - INFO
+ *   - HELP
+ *   - QUIT
+ */
 
 class VeloxKVServer
 {
@@ -33,42 +36,56 @@ public:
         SHARDED = 2
     };
 
-    // Constructor: takes only port (cache initialized by client via INIT command)
+    /**
+     * @brief Constructor for the TCP server.
+     *
+     * @param port The port number to listen on.
+     */
     VeloxKVServer(uint16_t port);
-
-    // Destructor: cleanup
     ~VeloxKVServer();
 
-    // Start server (blocks, listens for clients)
+    /**
+     * @brief Pre-initializes the cache with a specific type and capacity.
+     */
+    bool initialize(CacheType type, uint32_t capacity);
+
+    /**
+     * @brief Starts the server listening loop. Blocks the calling thread.
+     */
     bool start();
 
-    // Stop server gracefully
+    /**
+     * @brief Stops the server listening loop and closes the socket.
+     */
     void stop();
 
-    // Check if server is running
+    /**
+     * @brief Checks if the server is running.
+     */
     bool is_running() const { return running; }
 
 private:
-    // Socket and server state
     int server_socket;
     uint16_t port;
-    bool running;
+    std::atomic<bool> running;
 
-    // Cache instance (shared by all clients, nullptr until INIT command)
     std::unique_ptr<Cache<std::string, std::string>> cache;
     CacheType cache_type;
     uint32_t capacity;
     bool cache_initialized;
 
-    // Handle individual client connection (runs in separate thread)
-    // Takes the client's socket file descriptor
+    std::atomic<uint32_t> active_connections{0};
+
+    /**
+     * @brief Handles a client socket session in a dedicated thread.
+     */
     void handle_client(int client_socket);
 
-    // Process a single command from client
-    // Returns response string to send back to client
+    /**
+     * @brief Parses and executes a command string.
+     */
     std::string process_command(const std::string &command);
 
-    // Command handlers
     std::string handle_init(const std::vector<std::string> &args);
     std::string handle_get(const std::string &key);
     std::string handle_set(const std::string &args);
@@ -79,6 +96,5 @@ private:
     std::string handle_quit();
     std::string handle_help();
 
-    // Utility: parse command line
     std::vector<std::string> parse_command(const std::string &line);
 };
