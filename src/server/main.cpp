@@ -2,6 +2,8 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <string>
 
 /*
     VeloxKV Server
@@ -27,9 +29,6 @@
       GET mykey
       VALUE: myvalue
 */
-
-#include <sstream>
-#include <string>
 
 /**
  * @file main.cpp

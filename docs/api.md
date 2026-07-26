@@ -1,52 +1,256 @@
-# API Reference — KV Store Server
+# API Reference — VeloxKV Commands
 
-The server listens on port **6380** (default) and accepts newline-delimited text commands over TCP.
+VeloxKV uses a simple text-based TCP protocol. The server listens on port 6380 by default and expects one command per line.
+
+## Connection methods
+
+- `telnet localhost 6380`
+- `nc localhost 6380`
+- `./velox-kv-client`
+
+## Command reference
+
+### INIT — initialize the cache
+
+Format:
+```text
+INIT <type> <capacity>
+```
+
+Accepted values for `<type>`:
+- `serial`
+- `concurrent`
+- `sharded`
+
+Example:
+```text
+INIT concurrent 1000
+OK: CONCURRENT cache initialized (capacity: 1000)
+```
+
+Notes:
+- The cache must be initialized before most other commands.
+- Repeated initialization returns an error.
+
+### SET — store a key/value pair
+
+Format:
+```text
+SET <key> <value> [expiration_seconds]
+```
+
+Example:
+```text
+SET name alice
+OK
+```
+
+If an expiration is provided:
+```text
+SET token abc123 60
+OK
+```
+
+### GET — retrieve a value
+
+Format:
+```text
+GET <key>
+```
+
+Example:
+```text
+GET name
+VALUE alice
+```
+
+If the key is missing or expired:
+```text
+nil
+```
+
+### DEL — delete a key
+
+Format:
+```text
+DEL <key>
+```
+
+Example:
+```text
+DEL name
+1
+```
+
+### FLUSH — clear the cache
+
+Format:
+```text
+FLUSH
+```
+
+Response:
+```text
+OK
+```
+
+### STATS — show cache statistics
+
+Format:
+```text
+STATS
+```
+
+Example output:
+```text
+STATS:
+  hits: 10
+  misses: 3
+  hit_rate: 76.923077%
+  evictions: 0
+  active_connections: 1
+```
+
+### INFO — show server information
+
+Format:
+```text
+INFO
+```
+
+Example output:
+```text
+# VeloxKV Server
+version: 0.1.0
+port: 6380
+cache_type: concurrent
+capacity: 1000
+active_connections: 1
+```
+
+### HELP — show available commands
+
+Format:
+```text
+HELP
+```
+
+### QUIT / EXIT — disconnect
+
+Format:
+```text
+QUIT
+```
+
+Response:
+```text
+OK
+```
+
+## Notes on the protocol
+
+- The parser splits commands on whitespace.
+- Values with spaces are not supported in the current simple text protocol.
+- The server replies with a line-based response and then typically prints a prompt-style suffix.
+- The current implementation is intentionally small and easy to inspect.
+
+## Example session
+
+```text
+> INIT serial 1000
+OK: SERIAL cache initialized (capacity: 1000)
+
+> SET user alice
+OK
+
+> GET user
+VALUE alice
+
+> DEL user
+1
+
+> QUIT
+OK
+```
+
+DEL temp_data
+1
+
+GET temp_data
+nil
+
+STATS
+Total Hits: 5
+Total Misses: 1
+Hit Rate: 83.3%
+Evictions: 0
+Keys in Cache: 2
+
+FLUSH
+OK
+
+GET name
+nil
+
+QUIT
+OK
+```
 
 ---
 
-## Quick Start Testing (No Client Needed)
+## Error Handling
 
+### Common Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ERROR: Cache not initialized. Send INIT command first.` | Called command before INIT | Run `INIT type capacity` first |
+| `ERROR: Invalid cache type. Must be 0/serial, 1/concurrent, or 2/sharded` | Wrong type in INIT | Use 0, 1, 2 or serial, concurrent, sharded |
+| `ERROR: Capacity must be > 0` | Capacity was 0 or negative | Use positive integer |
+| `ERROR: Cache already initialized. Cannot reinitialize.` | Called INIT twice | Start new connection for new cache |
+| `ERROR: GET requires key` | Missing key argument | Format: `GET <key>` |
+| `ERROR: SET requires 'SET key value [ttl]'` | Invalid SET format | Format: `SET <key> <value> [ttl]` |
+
+---
+
+## Performance Notes
+
+| Operation | Time Complexity | Notes |
+|-----------|-----------------|-------|
+| `SET` | O(1) | Hash map insertion + LRU update |
+| `GET` | O(1) | Hash map lookup + LRU move-to-front |
+| `DEL` | O(1) | Hash map removal + DLL node removal |
+| `FLUSH` | O(n) | n = number of keys in cache |
+| `STATS` | O(1) | Atomic counter reads |
+
+---
+
+## Protocol Notes
+
+- **Line Ending:** Commands terminated with `\n` (newline)
+- **Case Sensitivity:** Commands are case-insensitive (`SET`, `set`, `Set` all work)
+- **Whitespace:** Multiple spaces between arguments treated as single separator
+- **Response Encoding:** UTF-8 text, line-terminated with `\r\n> `
+- **Max Command Size:** 1024 bytes per command
+
+---
+
+## Testing Commands
+
+Test all commands:
 ```bash
-# Connect with netcat
-nc localhost 6380
-
-# Or with telnet
-telnet localhost 6380
-```
-
----
-
-## Command Reference
-
-### SET
-
-Store a key-value pair. Overwrites if key exists.
-
-```
-SET <key> <value>
-SET <key> <value> TTL <milliseconds>
-```
-
-**Examples:**
-```
-SET name Alice
-OK
-
-SET session_token abc123 TTL 60000
-OK
-```
-
-**Notes:**
-- Keys and values are strings
-- TTL is in **milliseconds**
-- Without TTL, key persists until evicted or explicitly deleted
-
----
-
-### GET
-
-Retrieve the value for a key.
-
+INIT serial 100
+SET test1 value1
+SET test2 value2 10
+GET test1
+GET test2
+GET nonexistent
+DEL test1
+GET test1
+STATS
+INFO
+FLUSH
+QUIT
 ```
 GET <key>
 ```

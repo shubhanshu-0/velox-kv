@@ -1,1 +1,6 @@
-structure.md
+.DS_Store
+*.dSYM/
+*.o
+velox-kv-server
+velox-kv-tests
+velox-kv-client

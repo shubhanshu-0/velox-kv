@@ -1,278 +1,116 @@
-# VeloxKV — High-Performance In-Memory Cache
+# VeloxKV
 
-A **production-ready, thread-safe key-value cache** built from scratch in C++ with multiple eviction policies, TTL support, and a TCP server interface.
+VeloxKV is a small C++17 in-memory cache server with a simple TCP text protocol. It is designed to be easy to build, understand, and extend.
 
-<img width="1177" height="695" alt="Velox-KV" src="https://github.com/shubhanshu-0/velox-kv/blob/master/docs/design.png?raw=true" />
+## What this project includes
 
----
+- a TCP server that accepts client connections
+- a basic command protocol with `INIT`, `SET`, `GET`, `DEL`, `STATS`, `INFO`, and `QUIT`
+- three cache implementations:
+  - `serial` for a baseline single-threaded path
+  - `concurrent` for a shared-lock approach
+  - `sharded` for reduced contention across shards
+- an LRU-based cache policy
+- TTL/expiration support in the cache layer
 
-## ⚡ Features
+## Build and run
 
-✅ **Three Cache Architectures**
-- `SERIAL` — Single-threaded (benchmarking baseline)
-- `CONCURRENT` — Shared reader-writer lock (thread-safe)
-- `SHARDED` — 16-way sharding (high-concurrency)
-
-✅ **Eviction Policies**
-- **LRU** (Least Recently Used) — O(1) via DLL + HashMap
-- Pluggable strategy pattern (easy to add LFU, FIFO, etc.)
-
-✅ **Advanced Features**
-- TTL/Expiration with background eviction threads
-- Comprehensive STATS/INFO commands
-- Text-based protocol 
-
-✅ **Modern C++17**
-- Smart pointers (`shared_ptr`, `unique_ptr`)
-- Templates & generic programming
-- Thread-safe primitives (`std::shared_mutex`, `std::atomic`)
-
----
-
-## 🚀 Quick Start
-
-### Build
 ```bash
 make
-```
-
-### Run Server
-```bash
 ./velox-kv-server
 ```
 
-### Run Client (Interactive)
+In another terminal:
+
 ```bash
 ./velox-kv-client
 ```
 
-### Example Session
-```
-> INIT serial 10000
-OK: SERIAL cache ready (capacity: 10000)
+Example session:
 
-> SET username alice
+```text
+> INIT concurrent 1000
+OK: CONCURRENT cache initialized (capacity: 1000)
+
+> SET name alice
 OK
 
-> GET username
-VALUE: alice
-
-> DEL username
-1
+> GET name
+VALUE alice
 
 > QUIT
-```
-
-### Run Unit Tests
-```bash
-./velox-kv-tests
-```
-
----
-
-## 🏗️ Architecture
-
-### System Design
-```
-┌─────────────────────────────────────────────────────┐
-│           TCP Server (Port 6380)                    │
-│      Thread-per-connection + Text Protocol         │
-└──────────────────┬──────────────────────────────────┘
-                   │
-        ┌──────────┴──────────┐
-        │                     │
-   ┌────▼────┐         ┌─────▼──────┐
-   │  SERIAL │         │ CONCURRENT │
-   │ (no locks)        │(shared_mutex)
-   └────┬────┘         └─────┬──────┘
-        │                    │
-        └────────┬───────────┘
-                 │
-        ┌────────▼────────┐
-        │ Cache Manager   │
-        │  Interface      │
-        └────────┬────────┘
-                 │
-        ┌────────▼────────┐
-        │  LRU Policy     │
-        │ DLL + HashMap   │ ← O(1) GET/SET/DEL
-        │   (64KB cache)  │
-        └─────────────────┘
-```
-
-### Data Structure: LRU Cache
-```
-Memory Layout:
-┌─────────────┐
-│   HashMap   │  ← O(1) key lookup
-│  [key→node] │
-└─────────────┘
-       │
-       ├──────┐
-       │      │
-   ┌───▼──┐ ┌─▼───┐ ┌───┐ ┌────┐
-   │HEAD  │→│Node1│→│...│→│TAIL│  ← MRU...LRU (DLL)
-   └──────│←┴──┬──┴←┴───┴←┴─┬──┘
-          └────┴──────────┘
-```
-
-### Cache Types Comparison
-
-| Type | Locking | Best For | Throughput |
-|------|---------|----------|-----------|
-| **SERIAL** | None | Single-threaded, baseline | Baseline |
-| **CONCURRENT** | Global `shared_mutex` | Moderate concurrency | ~2-3x |
-| **SHARDED** | 16 per-shard mutexes | High concurrency | ~8-12x |
-
----
-
-## 📡 Protocol (Text-based)
-
-### Commands
-
-| Command | Format | Response | Example |
-|---------|--------|----------|---------|
-| **INIT** | `INIT <type> <capacity>` | `OK: TYPE ready (capacity: N)` | `INIT concurrent 10000` |
-| **SET** | `SET <key> <value> [ttl]` | `OK` | `SET name alice` |
-| **GET** | `GET <key>` | `VALUE: value` or `nil` | `GET name` |
-| **DEL** | `DEL <key>` | `1` (deleted) or `0` (not found) | `DEL name` |
-| **FLUSH** | `FLUSH` | `OK` | `FLUSH` |
-| **STATS** | `STATS` | Stats output | `STATS` |
-| **QUIT** | `QUIT` | `OK` | `QUIT` |
-
-### Example Interaction
-```bash
-$ telnet localhost 6380
-
-INIT serial 1000
-OK: SERIAL cache ready (capacity: 1000)
-
-SET mykey myvalue
-OK
-
-GET mykey
-VALUE: myvalue
-
-DEL mykey
-1
-
-GET mykey
-nil
-
-QUIT
 OK
 ```
 
----
+## Tests
 
-## 📊 Project Structure
-
-```
-velox-kv/
-├── include/
-│   ├── core/
-│   │   ├── cache_base.hpp          # Abstract Cache<K,V> interface
-│   │   ├── cache_manager.hpp       # Serial/Concurrent/Sharded implementations
-│   │   └── cache_expiration.hpp    # TTL + background eviction
-│   ├── policies/
-│   │   └── lru.hpp                 # LRU eviction policy
-│   └── server/
-│       └── tcp_server.hpp          # TCP server interface
-├── src/
-│   ├── server/
-│   │   ├── main.cpp                # Server entry point
-│   │   └── tcp_server.cpp          # Socket + connection handling
-│   └── (header-only templates, no other .cpp)
-├── tests/
-│   ├── tests.cpp                   # Unit tests (all 3 managers)
-│   └── test_client.cpp             # Interactive test client
-├── Makefile                        # g++ build (no external deps except pthread)
-└── docs/               
-    └── design.md                      # Deep-dive architecture
-```
-
----
-
-## 🔧 Build Details
-
-### Requirements
-- **C++17** (or later)
-- **pthread** (standard on macOS/Linux)
-- `g++` or `clang++`
-
-### Build Options
 ```bash
-make                # Build all (server, tests, client)
-make server         # Build only server
-make test           # Build only unit tests
-make client         # Build only interactive client
-make clean          # Remove binaries
+make test
 ```
 
-### Compilation
-```bash
-g++ -std=c++17 -Wall -Wextra -O3 -I. -lpthread src/server/main.cpp src/server/tcp_server.cpp -o velox-kv-server
+The test suite exercises the serial, concurrent, and sharded cache implementations.
+
+## Architecture overview
+
+```text
++---------------------+       +---------------------------+
+| TCP Server          | ----> | Cache Engine              |
+| - accept clients   |       | - serial                  |
+| - per-client thread|       | - concurrent              |
+| - text protocol    |       | - sharded                 |
++---------------------+       +---------------------------+
 ```
 
----
+### Cache type comparison
 
-## 🧪 Testing
+| Type | Concurrency model | Best for | Notes |
+|------|-------------------|----------|-------|
+| `serial` | none | baseline and simple debugging | lowest overhead |
+| `concurrent` | shared lock | moderate contention | simple thread-safe option |
+| `sharded` | multiple shard locks | higher concurrency | reduces lock contention |
 
-### Unit Tests (Cache Correctness)
-Tests all 3 cache manager types with concurrent operations:
-```bash
-./velox-kv-tests
-```
+## Protocol overview
 
-Expected output:
-```
-✓ Running SERIAL cache test...
-✓ Running CONCURRENT cache test...
-✓ Running SHARDED cache test...
-✓ All tests passed!
-```
+| Command | Example | Meaning |
+|---------|---------|---------|
+| `INIT` | `INIT concurrent 1000` | initialize the cache engine |
+| `SET` | `SET name alice` | store a key/value pair |
+| `GET` | `GET name` | retrieve a value |
+| `DEL` | `DEL name` | delete a key |
+| `STATS` | `STATS` | show cache stats |
+| `INFO` | `INFO` | show server info |
+| `QUIT` | `QUIT` | close the client session |
 
-### Integration Test (Server + Client)
-**Terminal 1:**
-```bash
-./velox-kv-server
-```
+### Example interaction
 
-**Terminal 2:**
-```bash
-./velox-kv-client
-```
-
-Test commands:
-```
-> INIT concurrent 5000
-> SET key1 value1
-> GET key1
-> SET key2 value2
-> DEL key1
-> GET key1
-> QUIT
-```
-
-### Manual Testing with Telnet
-```bash
-# Start server in one terminal
-./velox-kv-server
-
-# In another terminal
-telnet localhost 6380
+```text
 > INIT serial 1000
-> SET test data
-> GET test
+OK: SERIAL cache initialized (capacity: 1000)
+
+> SET user alice
+OK
+
+> GET user
+VALUE alice
+
+> DEL user
+1
+
 > QUIT
+OK
 ```
----
 
-## 📈 Performance Characteristics
+## Project structure
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| GET/SET/DEL | O(1) | Average case, hash map lookup |
-| Eviction | O(1) | Just move node in DLL |
-| Cache Miss | O(hash)| Depends on hash collision rate |
-| TTL Check | O(1) lazy | Checked on get(), not background |
+```text
+include/
+├── core/                # cache abstractions and managers
+├── policies/            # eviction policies such as LRU
+└── server/              # server interface
+src/
+├── server/              # server entry point and socket handling
+tests/
+├── tests.cpp            # cache engine tests
+└── test_client.cpp      # interactive client smoke test
+Makefile                 # build targets
+```

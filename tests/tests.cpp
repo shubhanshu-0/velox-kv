@@ -41,7 +41,7 @@ void run_concurrent_test(Cache<int, std::string> &manager, const std::string &ty
     for (int i = 0; i < num_threads; ++i)
     {
         workers.emplace_back(
-            [&manager, i, ops_per_thread]()
+            [&manager, i]()
             {
                 for (int j = 0; j < ops_per_thread; ++j)
                 {
