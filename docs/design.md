@@ -1,6 +1,8 @@
 # Design Notes — VeloxKV
 
-This document describes the current implementation of VeloxKV rather than an idealized future system.
+This document describes the current implementation of VeloxKV.
+
+<img width="1177" height="695" alt="Velox-KV architecture overview" src="https://github.com/shubhanshu-0/velox-kv/blob/master/docs/design.png?raw=true" />
 
 ## 1. System shape
 
@@ -10,6 +12,23 @@ VeloxKV is arranged in two layers:
 - a cache layer that stores key/value entries and applies the chosen concurrency strategy
 
 The server currently uses one thread per accepted client connection. The cache layer then decides how to protect shared state internally.
+
+```text
++---------------------------+
+| TCP Server                |
+| - accept connections      |
+| - parse text commands     |
+| - spawn client threads    |
++------------+--------------+
+             |
+             v
++---------------------------+
+| Cache Engine              |
+| - serial                  |
+| - concurrent              |
+| - sharded                 |
++---------------------------+
+```
 
 ## 2. Cache architecture
 
@@ -21,6 +40,19 @@ The cache interface is defined by the abstract `Cache<K, V>` base and implemente
 
 The LRU policy is implemented with a doubly linked list plus a hash map. This gives average O(1) behavior for lookup and update operations.
 
+```text
++-------------------+
+| Hash Map          |
+| key -> node       |
++--------+----------+
+         |
+         v
++-------------------+
+| Doubly Linked List|
+| MRU <-> ... <-> LRU|
++-------------------+
+```
+
 ## 3. Why the three cache modes exist
 
 Each mode is a different tradeoff:
@@ -31,11 +63,28 @@ Each mode is a different tradeoff:
 
 This makes the project useful as a concurrency study because the server-level threading and the cache-level synchronization are separate concerns.
 
+```text
+Serial:
+  one path, no lock contention
+
+Concurrent:
+  one shared lock protects the whole cache
+
+Sharded:
+  many smaller caches, each protected by its own lock
+```
+
 ## 4. Expiration and TTL handling
 
 The project supports expiration through `CacheExpiration`.
 
 The current design uses a background thread that waits until the next expiration time and then removes expired entries. This keeps the system responsive while avoiding a fully polling-based cleanup loop.
+
+```text
+Main thread: add entry with expiration time
+Background thread: sleep until next expiry
+If expired -> remove entry from cache
+```
 
 ## 5. Server-side concurrency
 
@@ -47,13 +96,25 @@ The server layer is intentionally simple:
 
 This makes it easy to reason about and test. It is not yet a high-scale event-driven server, but it is good enough to demonstrate how a server can service multiple clients concurrently.
 
+```text
+accept() -> new socket -> std::thread -> handle_client(socket)
+```
+
 ## 6. Why the sharded design helps
 
 A single global lock becomes a bottleneck when many threads compete for the same resources. Sharding reduces that contention because each shard has its own mutex and its own small cache instance. Keys are routed to a shard based on a hash, so concurrent access to different keys tends to stay isolated.
 
+```text
+hash(key) % 16 -> shard index
+```
+
 ## 7. Notes on correctness
 
 The design is careful about thread safety in the places where data structures are mutated. The cache wrappers protect the underlying policy with locks, and the expiration logic is coordinated so that cleanup does not race with regular access.
+
+Important implementation detail:
+- `get()` and `set()` both mutate shared state in the LRU policy, so the lock strategy matters a lot
+- the expiration thread must coordinate with ordinary cache operations so it does not corrupt the structure while it is removing entries
 
 ## 8. Current limitations
 

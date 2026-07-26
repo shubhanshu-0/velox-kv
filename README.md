@@ -1,8 +1,10 @@
 # VeloxKV
 
-VeloxKV is a small C++17 in-memory cache server with a simple TCP text protocol. It is designed to be easy to build, understand, and extend.
+VeloxKV is a small in-memory cache server with a simple TCP text protocol.
 
-## What this project includes
+<img width="1177" height="695" alt="Velox-KV architecture overview" src="https://github.com/shubhanshu-0/velox-kv/blob/master/docs/design.png?raw=true" />
+
+## Overview
 
 - a TCP server that accepts client connections
 - a basic command protocol with `INIT`, `SET`, `GET`, `DEL`, `STATS`, `INFO`, and `QUIT`
@@ -13,10 +15,11 @@ VeloxKV is a small C++17 in-memory cache server with a simple TCP text protocol.
 - an LRU-based cache policy
 - TTL/expiration support in the cache layer
 
-## Build and run
+## Getting started
 
 ```bash
 make
+
 ./velox-kv-server
 ```
 
@@ -42,7 +45,7 @@ VALUE alice
 OK
 ```
 
-## Tests
+## Verification
 
 ```bash
 make test
@@ -100,7 +103,7 @@ VALUE alice
 OK
 ```
 
-## Project structure
+## Repository structure
 
 ```text
 include/
