@@ -1,9 +1,9 @@
 #include "../../include/server/tcp_server.hpp"
-#include "../../include/core/cache_manager.hpp"
 #include "../../include/policies/lru.hpp"
 #include <algorithm>
 #include <csignal>
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -17,10 +17,10 @@
 
 /**
  * @file tcp_server.cpp
- * @brief VeloxKV TCP Server implementation.
+ * @brief VeloxKV TCP Server implementation (Single-threaded Non-blocking Event Loop).
  *
- * Implements socket setup, client connection pooling, protocol parsing,
- * and command routing to the underlying cache.
+ * Implements non-blocking socket setup, poll() event multiplexing, line-buffered command parsing,
+ * and command routing to the underlying cache engine.
  */
 
 static VeloxKVServer *g_server_instance = nullptr;
@@ -36,10 +36,11 @@ extern "C" void handle_termination_signal(int /*sig*/)
     }
 }
 
-VeloxKVServer::VeloxKVServer(uint16_t p)
-    : server_socket(-1), port(p), running(false), cache_initialized(false), active_connections(0)
+VeloxKVServer::VeloxKVServer(uint16_t p, uint32_t cap)
+    : server_socket(-1), port(p), running(false), capacity(cap), cache_initialized(false), active_connections(0)
 {
-    std::cout << "[INFO] Server configured on port " << port << " (awaiting INIT command)\n";
+    initialize(capacity);
+    std::cout << "[INFO] Server configured on port " << port << " (capacity: " << capacity << ")\n";
 }
 
 VeloxKVServer::~VeloxKVServer()
@@ -50,24 +51,12 @@ VeloxKVServer::~VeloxKVServer()
     }
 }
 
-bool VeloxKVServer::initialize(CacheType type, uint32_t cap)
+bool VeloxKVServer::initialize(uint32_t cap)
 {
-    std::vector<std::string> args = {"INIT", "", std::to_string(cap)};
-    if (type == CacheType::SERIAL)
-    {
-        args[1] = "serial";
-    }
-    else if (type == CacheType::CONCURRENT)
-    {
-        args[1] = "concurrent";
-    }
-    else if (type == CacheType::SHARDED)
-    {
-        args[1] = "sharded";
-    }
-
-    std::string res = handle_init(args);
-    return res.rfind("OK", 0) == 0;
+    capacity = cap > 0 ? cap : 10000;
+    cache = std::make_unique<LRUCache<std::string, std::string>>(capacity);
+    cache_initialized = true;
+    return true;
 }
 
 std::vector<std::string> VeloxKVServer::parse_command(const std::string &line)
@@ -84,104 +73,21 @@ std::vector<std::string> VeloxKVServer::parse_command(const std::string &line)
 
 std::string VeloxKVServer::handle_init(const std::vector<std::string> &args)
 {
-    if (cache_initialized)
+    if (args.size() >= 2)
     {
-        return "ERROR: Cache is already initialized. Cannot reinitialize.";
-    }
-
-    if (args.size() < 3)
-    {
-        return "ERROR: INIT syntax is 'INIT <type> <capacity>' (type: serial, concurrent, sharded)";
-    }
-
-    int type_val = -1;
-    std::string type_str = args[1];
-    std::transform(type_str.begin(), type_str.end(), type_str.begin(), ::tolower);
-
-    try
-    {
-        type_val = std::stoi(type_str);
-    }
-    catch (...)
-    {
-        if (type_str == "serial")
+        try
         {
-            type_val = 0;
+            uint32_t cap = std::stoul(args.back());
+            if (cap > 0)
+            {
+                initialize(cap);
+            }
         }
-        else if (type_str == "concurrent")
+        catch (...)
         {
-            type_val = 1;
-        }
-        else if (type_str == "sharded")
-        {
-            type_val = 2;
         }
     }
-
-    if (type_val < 0 || type_val > 2)
-    {
-        return "ERROR: Invalid cache type. Supported: serial, concurrent, sharded";
-    }
-
-    try
-    {
-        capacity = std::stoul(args[2]);
-    }
-    catch (...)
-    {
-        return "ERROR: Capacity must be a positive integer.";
-    }
-
-    if (capacity == 0)
-    {
-        return "ERROR: Capacity must be greater than zero.";
-    }
-
-    cache_type = static_cast<CacheType>(type_val);
-
-    auto factory = [](uint32_t c) { return std::make_unique<LRUCache<std::string, std::string>>(c); };
-
-    try
-    {
-        switch (cache_type)
-        {
-        case CacheType::SERIAL:
-            std::cout << "[INIT] Initializing SERIAL cache (capacity: " << capacity << ")\n";
-            cache = std::make_unique<SerialCache<std::string, std::string>>(factory, capacity);
-            break;
-
-        case CacheType::CONCURRENT:
-            std::cout << "[INIT] Initializing CONCURRENT cache (capacity: " << capacity << ")\n";
-            cache = std::make_unique<ConcurrentCache<std::string, std::string>>(factory, capacity);
-            break;
-
-        case CacheType::SHARDED:
-            std::cout << "[INIT] Initializing SHARDED cache (capacity: " << capacity << ")\n";
-            cache = std::make_unique<ShardedConcurrentCache<std::string, std::string>>(factory, capacity);
-            break;
-        }
-
-        cache_initialized = true;
-        std::string type_name;
-        switch (cache_type)
-        {
-        case CacheType::SERIAL:
-            type_name = "SERIAL";
-            break;
-        case CacheType::CONCURRENT:
-            type_name = "CONCURRENT";
-            break;
-        case CacheType::SHARDED:
-            type_name = "SHARDED";
-            break;
-        }
-        return "OK: " + type_name + " cache initialized (capacity: " + std::to_string(capacity) + ")";
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "[ERROR] Failed to allocate cache: " << e.what() << "\n";
-        return "ERROR: Internal initialization failure: " + std::string(e.what());
-    }
+    return "OK: Cache initialized (capacity: " + std::to_string(capacity) + ")";
 }
 
 std::string VeloxKVServer::handle_get(const std::string &key)
@@ -230,7 +136,6 @@ std::string VeloxKVServer::handle_del(const std::string &key)
 
 std::string VeloxKVServer::handle_flush()
 {
-    /* Clear statistics and trigger cache cleanup if needed in future versions. */
     return "OK";
 }
 
@@ -261,29 +166,9 @@ std::string VeloxKVServer::handle_stats()
 std::string VeloxKVServer::handle_info()
 {
     std::string info = "# VeloxKV Server\r\n";
-    info += "version: 0.1.0\r\n";
+    info += "version: 0.2.0 (Non-blocking Event Loop)\r\n";
     info += "port: " + std::to_string(port) + "\r\n";
-
-    if (cache_initialized)
-    {
-        switch (cache_type)
-        {
-        case CacheType::SERIAL:
-            info += "cache_type: serial\r\n";
-            break;
-        case CacheType::CONCURRENT:
-            info += "cache_type: concurrent\r\n";
-            break;
-        case CacheType::SHARDED:
-            info += "cache_type: sharded\r\n";
-            break;
-        }
-        info += "capacity: " + std::to_string(capacity) + "\r\n";
-    }
-    else
-    {
-        info += "cache_status: uninitialized\r\n";
-    }
+    info += "capacity: " + std::to_string(capacity) + "\r\n";
     info += "active_connections: " + std::to_string(active_connections.load()) + "\r\n";
     return info;
 }
@@ -361,55 +246,96 @@ std::string VeloxKVServer::process_command(const std::string &line)
     }
 }
 
-void VeloxKVServer::handle_client(int client_socket)
+void VeloxKVServer::set_nonblocking(int fd)
 {
-    active_connections.fetch_add(1, std::memory_order_relaxed);
-    char buffer[1024];
-
-    while (running)
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0)
     {
-        memset(buffer, 0, sizeof(buffer));
-        ssize_t bytes_received = ::recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+}
 
-        if (bytes_received < 0)
+void VeloxKVServer::accept_new_client()
+{
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    int client_fd = ::accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
+    if (client_fd < 0)
+    {
+        return;
+    }
+
+    set_nonblocking(client_fd);
+
+    pollfd pfd{};
+    pfd.fd = client_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    poll_fds.push_back(pfd);
+
+    client_sessions[client_fd] = ClientSession{client_fd, ""};
+    active_connections.fetch_add(1, std::memory_order_relaxed);
+}
+
+void VeloxKVServer::close_client(int client_fd)
+{
+    ::close(client_fd);
+    client_sessions.erase(client_fd);
+    for (auto it = poll_fds.begin(); it != poll_fds.end(); ++it)
+    {
+        if (it->fd == client_fd)
         {
+            poll_fds.erase(it);
             break;
         }
+    }
+    if (active_connections.load() > 0)
+    {
+        active_connections.fetch_sub(1, std::memory_order_relaxed);
+    }
+}
 
-        if (bytes_received == 0)
-        {
-            break;
-        }
+void VeloxKVServer::handle_client_data(int client_fd)
+{
+    char buffer[1024];
+    ssize_t bytes_received = ::recv(client_fd, buffer, sizeof(buffer) - 1, 0);
 
-        buffer[bytes_received] = '\0';
-        std::string command(buffer);
-        command.erase(command.find_last_not_of(" \n\r\t") + 1);
+    if (bytes_received <= 0)
+    {
+        close_client(client_fd);
+        return;
+    }
 
-        if (command.empty())
+    buffer[bytes_received] = '\0';
+    auto &session = client_sessions[client_fd];
+    session.read_buffer += std::string(buffer, bytes_received);
+
+    size_t pos = 0;
+    while ((pos = session.read_buffer.find('\n')) != std::string::npos)
+    {
+        std::string line = session.read_buffer.substr(0, pos);
+        session.read_buffer.erase(0, pos + 1);
+
+        line.erase(line.find_last_not_of(" \n\r\t") + 1);
+
+        if (line.empty())
         {
             continue;
         }
 
-        std::string response = process_command(command);
+        std::string response = process_command(line);
 
-        if (command == "QUIT" || command == "EXIT")
+        if (line == "QUIT" || line == "EXIT")
         {
-            response = "OK";
-            ::send(client_socket, (response + "\r\n").c_str(), response.size() + 2, 0);
-            break;
+            response = "OK\r\n";
+            ::send(client_fd, response.c_str(), response.size(), 0);
+            close_client(client_fd);
+            return;
         }
 
         response += "\r\n> ";
-        ssize_t bytes_sent = ::send(client_socket, response.c_str(), response.size(), 0);
-
-        if (bytes_sent < 0)
-        {
-            break;
-        }
+        ::send(client_fd, response.c_str(), response.size(), 0);
     }
-
-    ::close(client_socket);
-    active_connections.fetch_sub(1, std::memory_order_relaxed);
 }
 
 bool VeloxKVServer::start()
@@ -452,41 +378,74 @@ bool VeloxKVServer::start()
         return false;
     }
 
+    set_nonblocking(server_socket);
+
+    poll_fds.clear();
+    client_sessions.clear();
+
+    pollfd server_pfd{};
+    server_pfd.fd = server_socket;
+    server_pfd.events = POLLIN;
+    server_pfd.revents = 0;
+    poll_fds.push_back(server_pfd);
+
     running = true;
-    std::cout << "[SERVER] VeloxKV is listening on port " << port << "\n";
+    std::cout << "[SERVER] VeloxKV listening on port " << port << " (Non-blocking Event Loop)\n";
 
     while (running)
     {
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        int client_socket = ::accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
-
-        if (client_socket < 0)
+        int poll_count = ::poll(poll_fds.data(), poll_fds.size(), 100); // 100ms timeout
+        if (poll_count < 0)
         {
+            if (errno == EINTR)
+                continue;
             break;
         }
 
-        std::thread client_thread([this, client_socket]() { this->handle_client(client_socket); });
-        client_thread.detach();
+        if (poll_count == 0)
+        {
+            continue;
+        }
+
+        if (poll_fds[0].revents & POLLIN)
+        {
+            accept_new_client();
+        }
+
+        for (size_t i = 1; i < poll_fds.size();)
+        {
+            int client_fd = poll_fds[i].fd;
+            short revents = poll_fds[i].revents;
+
+            if (revents & (POLLIN | POLLHUP | POLLERR))
+            {
+                size_t prev_size = poll_fds.size();
+                handle_client_data(client_fd);
+                if (poll_fds.size() < prev_size)
+                {
+                    // Client was removed/closed, do not increment i
+                    continue;
+                }
+            }
+            i++;
+        }
     }
 
-    if (server_socket >= 0)
-    {
-        ::close(server_socket);
-        server_socket = -1;
-    }
-
+    stop();
     return true;
 }
 
 void VeloxKVServer::stop()
 {
     running = false;
-    if (server_socket >= 0)
+    for (auto &pfd : poll_fds)
     {
-        /* Shutdown read/write channels on socket to wake any blocking accept() */
-        ::shutdown(server_socket, SHUT_RDWR);
-        ::close(server_socket);
-        server_socket = -1;
+        if (pfd.fd >= 0)
+        {
+            ::close(pfd.fd);
+        }
     }
+    poll_fds.clear();
+    client_sessions.clear();
+    server_socket = -1;
 }

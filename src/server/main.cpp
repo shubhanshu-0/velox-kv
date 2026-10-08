@@ -61,8 +61,7 @@ int main(int argc, char *argv[])
     std::cout << "╚════════════════════════════════════════════╝\n\n";
 
     uint16_t port = 6380;
-    uint32_t capacity = 0;
-    std::string type_str = "concurrent";
+    uint32_t capacity = 10000;
 
     /* Parse command-line parameters. */
     for (int i = 1; i < argc; ++i)
@@ -92,17 +91,12 @@ int main(int argc, char *argv[])
                 return 1;
             }
         }
-        else if ((arg == "-t" || arg == "--type") && i + 1 < argc)
-        {
-            type_str = argv[++i];
-        }
         else if (arg == "-h" || arg == "--help")
         {
             std::cout << "Usage: " << argv[0] << " [options]\n\n"
                       << "Options:\n"
                       << "  -p, --port <port>        Port number to listen on (default: 6380)\n"
-                      << "  -c, --capacity <cap>     Pre-allocated cache capacity (default: 0, client must INIT)\n"
-                      << "  -t, --type <type>        Cache type: serial, concurrent, sharded (default: concurrent)\n"
+                      << "  -c, --capacity <cap>     Max cache capacity (default: 10000)\n"
                       << "  -h, --help               Display configuration guidelines\n";
             return 0;
         }
@@ -112,44 +106,8 @@ int main(int argc, char *argv[])
 
     try
     {
-        VeloxKVServer server(port);
-
-        /* Pre-initialize the cache if capacity is set via CLI. */
-        if (capacity > 0)
-        {
-            VeloxKVServer::CacheType c_type;
-            if (type_str == "serial")
-            {
-                c_type = VeloxKVServer::CacheType::SERIAL;
-            }
-            else if (type_str == "concurrent")
-            {
-                c_type = VeloxKVServer::CacheType::CONCURRENT;
-            }
-            else if (type_str == "sharded")
-            {
-                c_type = VeloxKVServer::CacheType::SHARDED;
-            }
-            else
-            {
-                std::cerr << "[ERROR] Invalid cache type '" << type_str << "'. Must be: serial, concurrent, or sharded."
-                          << std::endl;
-                return 1;
-            }
-
-            Log("INFO", "Pre-configuring " + type_str + " cache (capacity: " + std::to_string(capacity) + ")...");
-            if (!server.initialize(c_type, capacity))
-            {
-                Log("ERROR", "Failed to pre-initialize the cache system.");
-                return 1;
-            }
-        }
-        else
-        {
-            Log("INFO", "Awaiting client INIT command for cache configuration on port " + std::to_string(port));
-        }
-
-        Log("INFO", "Starting listener thread on port " + std::to_string(port) + "...");
+        VeloxKVServer server(port, capacity);
+        Log("INFO", "Starting Non-blocking Event Loop on port " + std::to_string(port) + "...");
         server.start();
 
         Log("INFO", "Server stopped gracefully.");

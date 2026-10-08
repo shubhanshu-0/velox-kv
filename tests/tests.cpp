@@ -1,4 +1,3 @@
-#include "../include/core/cache_manager.hpp"
 #include "../include/policies/lru.hpp"
 #include <cassert>
 #include <iostream>
@@ -29,57 +28,35 @@ void run_basic_test(Cache<int, std::string> &manager, const std::string &type_na
     std::cout << "[PASS] " << type_name << " - Basic Operations Passed!" << std::endl;
 }
 
-// A helper for high-concurrency testing
-void run_concurrent_test(Cache<int, std::string> &manager, const std::string &type_name)
+// A helper for high-volume operation testing
+void run_throughput_test(Cache<int, std::string> &manager, const std::string &type_name)
 {
-    std::cout << "[TEST] " << type_name << " - Heavy Concurrency..." << std::endl;
+    std::cout << "[TEST] " << type_name << " - High Volume Operations..." << std::endl;
 
-    const int ops_per_thread = 1000;
-    const int num_threads = 8;
-    std::vector<std::thread> workers;
-
-    for (int i = 0; i < num_threads; ++i)
+    const int total_ops = 8000;
+    for (int j = 0; j < total_ops; ++j)
     {
-        workers.emplace_back(
-            [&manager, i]()
-            {
-                for (int j = 0; j < ops_per_thread; ++j)
-                {
-                    int key = i * ops_per_thread + j;
-                    manager.set(key, "Val" + std::to_string(key));
-                }
-            });
+        manager.set(j, "Val" + std::to_string(j));
     }
 
-    for (auto &t : workers)
-        t.join();
-    std::cout << "[PASS] " << type_name << " - Concurrency Stable!" << std::endl;
+    for (int j = 0; j < total_ops; ++j)
+    {
+        auto res = manager.get(j);
+        assert(res.has_value() && res.value() == "Val" + std::to_string(j));
+    }
+
+    std::cout << "[PASS] " << type_name << " - High Volume Stable!" << std::endl;
 }
 
 int main()
 {
-    auto factory = [](uint32_t cap) { return std::make_unique<LRUCache<int, std::string>>(cap); };
-
-    // 1. Test Serial Cache
+    // Test LRUCache Engine Directly
     {
-        SerialCache<int, std::string> serial(factory, 100);
-        run_basic_test(serial, "SerialCache");
+        LRUCache<int, std::string> engine(10000);
+        run_basic_test(engine, "LRUCache");
+        run_throughput_test(engine, "LRUCache");
     }
 
-    // 2. Test Concurrent Cache
-    {
-        ConcurrentCache<int, std::string> concurrent(factory, 500);
-        run_basic_test(concurrent, "ConcurrentCache");
-        run_concurrent_test(concurrent, "ConcurrentCache");
-    }
-
-    // 3. Test Sharded Concurrent Cache
-    {
-        ShardedConcurrentCache<int, std::string> sharded(factory, 1024);
-        run_basic_test(sharded, "ShardedConcurrentCache");
-        run_concurrent_test(sharded, "ShardedConcurrentCache");
-    }
-
-    std::cout << "\nALL CACHE MANAGER TESTS PASSED SUCCESSFULLY!" << std::endl;
+    std::cout << "\nALL CACHE ENGINE TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

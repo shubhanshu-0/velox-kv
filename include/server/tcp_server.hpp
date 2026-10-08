@@ -1,17 +1,19 @@
 #pragma once
-#include "../core/cache_manager.hpp"
+#include "../policies/lru.hpp"
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <poll.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 /**
  * @file tcp_server.hpp
- * @brief VeloxKV TCP Server interface.
+ * @brief VeloxKV TCP Server interface (Single-threaded Non-blocking Event Loop).
  *
- * Each client connection is handled in a separate thread.
- * All clients share a common thread-safe cache instance.
+ * All client connections are managed asynchronously in a single non-blocking event loop using poll().
+ * All clients share a common cache instance.
  *
  * Protocol: Simple text commands
  * Commands:
@@ -26,36 +28,36 @@
  *   - QUIT
  */
 
+struct ClientSession
+{
+    int socket_fd;
+    std::string read_buffer;
+};
+
 class VeloxKVServer
 {
 public:
-    enum class CacheType
-    {
-        SERIAL = 0,
-        CONCURRENT = 1,
-        SHARDED = 2
-    };
-
     /**
      * @brief Constructor for the TCP server.
      *
      * @param port The port number to listen on.
+     * @param capacity Maximum capacity for the cache.
      */
-    VeloxKVServer(uint16_t port);
+    VeloxKVServer(uint16_t port, uint32_t capacity = 10000);
     ~VeloxKVServer();
 
     /**
-     * @brief Pre-initializes the cache with a specific type and capacity.
+     * @brief Initializes the cache engine.
      */
-    bool initialize(CacheType type, uint32_t capacity);
+    bool initialize(uint32_t capacity);
 
     /**
-     * @brief Starts the server listening loop. Blocks the calling thread.
+     * @brief Starts the server event loop. Blocks the calling thread.
      */
     bool start();
 
     /**
-     * @brief Stops the server listening loop and closes the socket.
+     * @brief Stops the server event loop and closes all client sockets.
      */
     void stop();
 
@@ -70,16 +72,18 @@ private:
     std::atomic<bool> running;
 
     std::unique_ptr<Cache<std::string, std::string>> cache;
-    CacheType cache_type;
     uint32_t capacity;
     bool cache_initialized;
 
     std::atomic<uint32_t> active_connections{0};
 
-    /**
-     * @brief Handles a client socket session in a dedicated thread.
-     */
-    void handle_client(int client_socket);
+    std::vector<struct pollfd> poll_fds;
+    std::unordered_map<int, ClientSession> client_sessions;
+
+    void set_nonblocking(int fd);
+    void accept_new_client();
+    void handle_client_data(int client_fd);
+    void close_client(int client_fd);
 
     /**
      * @brief Parses and executes a command string.

@@ -1,119 +1,105 @@
 # VeloxKV
 
-VeloxKV is a small in-memory cache server with a simple TCP text protocol.
-
-<img width="1177" height="695" alt="Velox-KV architecture overview" src="https://github.com/shubhanshu-0/velox-kv/blob/master/docs/design.png?raw=true" />
+VeloxKV is a high-performance, single-threaded, non-blocking in-memory key-value cache server written in C++17.
 
 ## Overview
 
-- a TCP server that accepts client connections
-- a basic command protocol with `INIT`, `SET`, `GET`, `DEL`, `STATS`, `INFO`, and `QUIT`
-- three cache implementations:
-  - `serial` for a baseline single-threaded path
-  - `concurrent` for a shared-lock approach
-  - `sharded` for reduced contention across shards
-- an LRU-based cache policy
-- TTL/expiration support in the cache layer
+- **Asynchronous Non-Blocking I/O:** Uses POSIX `poll()` event multiplexing to handle thousands of concurrent client connections on a single OS thread.
+- **Lock-Free Cache Engine:** Integrated LRU eviction policy with zero mutex overhead and zero virtual call indirection.
+- **Threadless TTL Expiration:** Passive expiration on read accesses combined with active non-blocking sampling.
+- **Protocol:** Text-based protocol supporting `SET`, `GET`, `DEL`, `STATS`, `INFO`, `HELP`, and `QUIT`.
 
-## Getting started
+## Getting Started
 
 ```bash
 make
 
+# Start the server (default port: 6380, capacity: 10000)
 ./velox-kv-server
 ```
 
-In another terminal:
+In another terminal, connect using `nc`, `telnet`, or Python:
 
 ```bash
-./velox-kv-client
+nc localhost 6380
 ```
 
 Example session:
 
 ```text
-> INIT concurrent 1000
-OK: CONCURRENT cache initialized (capacity: 1000)
-
 > SET name alice
 OK
 
 > GET name
 VALUE alice
 
+> SET session_token 12345 10
+OK
+
+> STATS
+STATS:
+  hits: 1
+  misses: 0
+  hit_rate: 100.000000%
+  evictions: 0
+  active_connections: 1
+
 > QUIT
 OK
 ```
 
-## Verification
+## Running Tests
 
 ```bash
 make test
 ```
 
-The test suite exercises the serial, concurrent, and sharded cache implementations.
+Exercises basic key-value operations and high-volume throughput tests against the `LRUCache` engine.
 
-## Architecture overview
+## Architecture Overview
 
 ```text
-+---------------------+       +---------------------------+
-| TCP Server          | ----> | Cache Engine              |
-| - accept clients   |       | - serial                  |
-| - per-client thread|       | - concurrent              |
-| - text protocol    |       | - sharded                 |
-+---------------------+       +---------------------------+
+  [ Client Connections ]
+     │  nc / python / sockets
+     ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Single-Threaded Non-Blocking Network Server                │
+│  - POSIX poll() Event Multiplexer                           │
+│  - Non-Blocking Sockets (O_NONBLOCK)                        │
+│  - Line-Buffered Stream Parser                              │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Direct Execution (Zero Locks)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Lock-Free LRU Cache Engine                                 │
+│  ├── std::unordered_map<K, Node*>  ───> O(1) Key Lookups   │
+│  ├── Doubly-Linked List (Sentinel) ───> MRU / LRU Recency   │
+│  └── Threadless Expiration Manager ───> Passive/Active TTL  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Cache type comparison
-
-| Type | Concurrency model | Best for | Notes |
-|------|-------------------|----------|-------|
-| `serial` | none | baseline and simple debugging | lowest overhead |
-| `concurrent` | shared lock | moderate contention | simple thread-safe option |
-| `sharded` | multiple shard locks | higher concurrency | reduces lock contention |
-
-## Protocol overview
+## Protocol Overview
 
 | Command | Example | Meaning |
 |---------|---------|---------|
-| `INIT` | `INIT concurrent 1000` | initialize the cache engine |
-| `SET` | `SET name alice` | store a key/value pair |
-| `GET` | `GET name` | retrieve a value |
-| `DEL` | `DEL name` | delete a key |
-| `STATS` | `STATS` | show cache stats |
-| `INFO` | `INFO` | show server info |
-| `QUIT` | `QUIT` | close the client session |
+| `SET` | `SET name alice [ttl]` | Store a key/value pair with optional TTL in seconds |
+| `GET` | `GET name` | Retrieve a value |
+| `DEL` | `DEL name` | Delete a key |
+| `STATS` | `STATS` | View server cache metrics & active connection count |
+| `INFO` | `INFO` | View server version & capacity details |
+| `HELP` | `HELP` | List supported commands |
+| `QUIT` | `QUIT` | Close the client connection |
 
-### Example interaction
-
-```text
-> INIT serial 1000
-OK: SERIAL cache initialized (capacity: 1000)
-
-> SET user alice
-OK
-
-> GET user
-VALUE alice
-
-> DEL user
-1
-
-> QUIT
-OK
-```
-
-## Repository structure
+## Repository Structure
 
 ```text
 include/
-├── core/                # cache abstractions and managers
-├── policies/            # eviction policies such as LRU
-└── server/              # server interface
+├── core/                # Cache interfaces and threadless TTL manager
+├── policies/            # High-performance LRU cache engine
+└── server/              # Non-blocking poll() TCP server interface
 src/
-├── server/              # server entry point and socket handling
+└── server/              # Server daemon entry point and socket handling
 tests/
-├── tests.cpp            # cache engine tests
-└── test_client.cpp      # interactive client smoke test
-Makefile                 # build targets
+└── tests.cpp            # Unit & throughput test suite
+Makefile                 # Build configuration
 ```
