@@ -1,139 +1,50 @@
 # Design Notes — VeloxKV
 
-This document describes the current implementation of VeloxKV.
+This document describes the high-performance architecture of VeloxKV.
 
-<img width="1177" height="695" alt="Velox-KV architecture overview" src="https://github.com/shubhanshu-0/velox-kv/blob/master/docs/design.png?raw=true" />
+## 1. System Shape
 
-## 1. System shape
+VeloxKV is built with a single-threaded non-blocking architecture:
 
-VeloxKV is arranged in two layers:
-
-- a TCP server layer that accepts client connections and parses commands
-- a cache layer that stores key/value entries and applies the chosen concurrency strategy
-
-The server currently uses one thread per accepted client connection. The cache layer then decides how to protect shared state internally.
+- **Server Network Layer:** POSIX `poll()` event multiplexing for non-blocking TCP socket I/O.
+- **Cache Engine Layer:** Single-layer lock-free `LRUCache` with integrated TTL expiration and metrics.
 
 ```text
-+---------------------------+
-| TCP Server                |
-| - accept connections      |
-| - parse text commands     |
-| - spawn client threads    |
-+------------+--------------+
-             |
-             v
-+---------------------------+
-| Cache Engine              |
-| - serial                  |
-| - concurrent              |
-| - sharded                 |
-+---------------------------+
+┌─────────────────────────────────────────────────────────────┐
+│  Single-Threaded Non-Blocking Network Server                │
+│  - POSIX poll() Event Multiplexer                           │
+│  - Non-Blocking Sockets (O_NONBLOCK)                        │
+│  - Line-Buffered Stream Parser                              │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Direct Execution (Zero Locks)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Lock-Free LRU Cache Engine                                 │
+│  ├── std::unordered_map<K, Node*>  ───> O(1) Key Lookups   │
+│  ├── Doubly-Linked List (Sentinel) ───> MRU / LRU Recency   │
+│  └── Threadless Expiration Manager ───> Passive/Active TTL  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## 2. Cache architecture
+## 2. Event-Driven Network Model
 
-The cache interface is defined by the abstract `Cache<K, V>` base and implemented through a small set of wrappers:
+The server avoids the overhead of spawning an OS thread per client connection:
 
-- `SerialCache` for baseline single-threaded behavior
-- `ConcurrentCache` for a shared-lock design using `std::shared_mutex`
-- `ShardedConcurrentCache` for reduced contention across 16 shards
+1. Listening socket and client sockets are set to non-blocking mode (`O_NONBLOCK` via `fcntl`).
+2. Sockets are registered with POSIX `poll()`.
+3. Incoming TCP streams are accumulated in per-client `ClientSession` read buffers, parsing complete line commands (`\n` or `\r\n`).
+4. Thousands of client connections can be multiplexed efficiently on **1 single thread** with kilobytes of RAM overhead.
 
-The LRU policy is implemented with a doubly linked list plus a hash map. This gives average O(1) behavior for lookup and update operations.
+## 3. Lock-Free LRU Cache Engine
 
-```text
-+-------------------+
-| Hash Map          |
-| key -> node       |
-+--------+----------+
-         |
-         v
-+-------------------+
-| Doubly Linked List|
-| MRU <-> ... <-> LRU|
-+-------------------+
-```
+The cache layer combines an `unordered_map` for $O(1)$ lookups and a doubly-linked list with sentinel nodes for recency tracking.
 
-## 3. Why the three cache modes exist
+* **Zero Mutex Overhead:** Since execution is single-threaded inside the event loop, all mutexes (`std::shared_mutex`, `std::mutex`) and atomic variables have been eliminated.
+* **Direct Execution:** Key lookups and updates execute directly without virtual dispatch or wrapper indirection.
 
-Each mode is a different tradeoff:
+## 4. Expiration and TTL Handling
 
-- `serial`: simplest and lowest overhead
-- `concurrent`: introduces locking to make the cache safe under concurrent access
-- `sharded`: reduces lock contention by splitting keys across multiple shards
+TTL handling is **threadless**:
 
-This makes the project useful as a concurrency study because the server-level threading and the cache-level synchronization are separate concerns.
-
-```text
-Serial:
-  one path, no lock contention
-
-Concurrent:
-  one shared lock protects the whole cache
-
-Sharded:
-  many smaller caches, each protected by its own lock
-```
-
-## 4. Expiration and TTL handling
-
-The project supports expiration through `CacheExpiration`.
-
-The current design uses a background thread that waits until the next expiration time and then removes expired entries. This keeps the system responsive while avoiding a fully polling-based cleanup loop.
-
-```text
-Main thread: add entry with expiration time
-Background thread: sleep until next expiry
-If expired -> remove entry from cache
-```
-
-## 5. Server-side concurrency
-
-The server layer is intentionally simple:
-
-- accept a client socket
-- spawn a worker thread
-- run `handle_client(...)` in that thread
-
-This makes it easy to reason about and test. It is not yet a high-scale event-driven server, but it is good enough to demonstrate how a server can service multiple clients concurrently.
-
-```text
-accept() -> new socket -> std::thread -> handle_client(socket)
-```
-
-## 6. Why the sharded design helps
-
-A single global lock becomes a bottleneck when many threads compete for the same resources. Sharding reduces that contention because each shard has its own mutex and its own small cache instance. Keys are routed to a shard based on a hash, so concurrent access to different keys tends to stay isolated.
-
-```text
-hash(key) % 16 -> shard index
-```
-
-## 7. Notes on correctness
-
-The design is careful about thread safety in the places where data structures are mutated. The cache wrappers protect the underlying policy with locks, and the expiration logic is coordinated so that cleanup does not race with regular access.
-
-Important implementation detail:
-- `get()` and `set()` both mutate shared state in the LRU policy, so the lock strategy matters a lot
-- the expiration thread must coordinate with ordinary cache operations so it does not corrupt the structure while it is removing entries
-
-## 8. Current limitations
-
-The project is intentionally scoped for learning and demonstration. It does not yet include:
-
-- persistence
-- replication or clustering
-- TLS or authentication
-- a high-scale event-driven networking model such as `epoll`
-
-## 9. Why this design is still useful
-
-This project is useful because it shows a compact but real backend stack:
-
-- network I/O
-- concurrency
-- synchronization tradeoffs
-- cache policy design
-- testable behavior
-
-That makes it a strong interview and portfolio project for someone targeting backend or systems work.
-
+* **Passive Expiration:** Key read calls (`GET`) check timestamp and TTL; expired keys are purged immediately on access.
+* **Active Purging:** Non-blocking `purge_expired()` calls can be triggered directly during event loop idle cycles.
